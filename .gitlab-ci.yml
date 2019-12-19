@@ -6,12 +6,28 @@ variables:
 
 stages:
   - ci-image
-  - test
-  - unit-cbt
-  - e2e-cbt
-  - pre-deploy-notify
-  - deploy
-  - notify
+  - pre-publish
+  - publish
+
+pre-publish:
+  stage: pre-publish
+  tags: ['runner:main', 'size:large']
+  image: $CI_IMAGE
+  artifacts:
+    paths:
+      - build/
+  script:
+    - mkdir build
+    - echo coucou > build/coucou.txt
+
+publish:
+  stage: publish
+  tags: ['runner:main', 'size:large']
+  image: $CI_IMAGE
+  dependencies:
+    - pre-publish
+  script:
+    - cat build/coucou.txt
 
 ci-image:
   stage: ci-image
@@ -22,176 +38,3 @@ ci-image:
   script:
     - docker build --tag $CI_IMAGE .
     - docker push $CI_IMAGE
-
-format:
-  stage: test
-  tags: ['runner:main', 'size:large']
-  image: $CI_IMAGE
-  script:
-    - yarn
-    - yarn format
-
-lint:
-  stage: test
-  tags: ['runner:main', 'size:large']
-  image: $CI_IMAGE
-  script:
-    - yarn
-    - yarn lint
-
-build:
-  stage: test
-  tags: ['runner:main', 'size:large']
-  image: $CI_IMAGE
-  script:
-    - yarn
-    - yarn build
-
-unit:
-  stage: test
-  tags: ['runner:main', 'size:large']
-  image: $CI_IMAGE
-  script:
-    - yarn
-    - yarn test
-
-bundle-e2e:
-  stage: test
-  tags: ['runner:main', 'size:large']
-  image: $CI_IMAGE
-  script:
-    - yarn
-    - yarn test:e2e:bundle
-
-npm-e2e:
-  stage: test
-  tags: ['runner:main', 'size:large']
-  image: $CI_IMAGE
-  script:
-    - yarn
-    - yarn test:e2e:npm
-
-unit-cbt:
-  except:
-    refs:
-      - master
-      - tags
-  stage: unit-cbt
-  tags: ['runner:main', 'size:large']
-  image: $CI_IMAGE
-  script:
-    - yarn
-    - ./scripts/ci-cbt.sh test:unit
-
-e2e-cbt:
-  except:
-    refs:
-      - master
-      - tags
-  stage: e2e-cbt
-  tags: ['runner:main', 'size:large']
-  image: $CI_IMAGE
-  script:
-    - yarn
-    - ./scripts/ci-cbt.sh test:e2e
-
-deploy-staging:
-  only:
-    refs:
-      - master
-  stage: deploy
-  tags: ['runner:main', 'size:large']
-  image: $CI_IMAGE
-  script:
-    - yarn
-    - TARGET_DATACENTER=eu TARGET_ENV=staging VERSION=staging yarn build:bundle
-    - ./scripts/deploy.sh staging eu
-    - TARGET_DATACENTER=us TARGET_ENV=staging VERSION=staging yarn build:bundle
-    - ./scripts/deploy.sh staging us
-
-deploy-release:
-  only:
-    refs:
-      - tags
-  stage: deploy
-  when: manual
-  allow_failure: false
-  tags: ['runner:main', 'size:large']
-  image: $CI_IMAGE
-  script:
-    - yarn
-    - TARGET_DATACENTER=us TARGET_ENV=production VERSION=release yarn build:bundle
-    - ./scripts/deploy.sh prod us
-    - TARGET_DATACENTER=eu TARGET_ENV=production VERSION=release yarn build:bundle
-    - ./scripts/deploy.sh prod eu
-
-########################################################################################################################
-# Notify
-########################################################################################################################
-
-include: 'https://gitlab-templates.ddbuild.io/slack-notifier/v1/template.yml'
-
-notify-feature-branch-failure:
-  extends: .slack-notifier.on-failure
-  except:
-    refs:
-      - master
-      - tags
-
-notify-master-success:
-  extends: .slack-notifier-base
-  only:
-    refs:
-      - master
-  script:
-    - COMMIT_MESSAGE=`git show-branch --no-name HEAD`
-    - COMMIT_URL="$CI_PROJECT_URL/commits/$CI_COMMIT_SHA"
-    - 'MESSAGE_TEXT=":rocket: $CI_PROJECT_NAME <$COMMIT_URL|$COMMIT_MESSAGE> deployed to :datadog_staging:."'
-    - postmessage "#rum-deploy" "$MESSAGE_TEXT"
-
-notify-master-failure:
-  extends: .slack-notifier-base
-  when: on_failure
-  only:
-    refs:
-      - master
-  script:
-    - COMMIT_MESSAGE=`git show-branch --no-name HEAD`
-    - BUILD_URL="$CI_PROJECT_URL/pipelines/$CI_PIPELINE_ID"
-    - 'MESSAGE_TEXT=":host-red: $CI_PROJECT_NAME master pipeline for <$BUILD_URL|$COMMIT_MESSAGE> failed."'
-    - postmessage "#rum-deploy" "$MESSAGE_TEXT"
-
-notify-release-ready:
-  extends: .slack-notifier-base
-  stage: pre-deploy-notify
-  only:
-    refs:
-      - tags
-  script:
-    - COMMIT_MESSAGE=`git show-branch --no-name HEAD`
-    - BUILD_URL="$CI_PROJECT_URL/pipelines/$CI_PIPELINE_ID"
-    - 'MESSAGE_TEXT=":i: $CI_PROJECT_NAME <$BUILD_URL|$COMMIT_MESSAGE> ready to be deployed to :datadog:"'
-    - postmessage "#rum-deploy" "$MESSAGE_TEXT"
-
-notify-release-success:
-  extends: .slack-notifier-base
-  only:
-    refs:
-      - tags
-  script:
-    - COMMIT_MESSAGE=`git show-branch --no-name HEAD`
-    - COMMIT_URL="$CI_PROJECT_URL/commits/$CI_COMMIT_SHA"
-    - 'MESSAGE_TEXT=":rocket: $CI_PROJECT_NAME <$COMMIT_URL|$COMMIT_MESSAGE> deployed to :datadog:."'
-    - postmessage "#rum-deploy" "$MESSAGE_TEXT"
-
-notify-release-failure:
-  extends: .slack-notifier-base
-  when: on_failure
-  only:
-    refs:
-      - tags
-  script:
-    - COMMIT_MESSAGE=`git show-branch --no-name HEAD`
-    - BUILD_URL="$CI_PROJECT_URL/pipelines/$CI_PIPELINE_ID"
-    - 'MESSAGE_TEXT=":host-red: $CI_PROJECT_NAME release pipeline <$BUILD_URL|$COMMIT_MESSAGE> failed."'
-    - postmessage "#rum-deploy" "$MESSAGE_TEXT"
